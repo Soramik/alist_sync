@@ -588,6 +588,7 @@ class AlistV3:
             raise AlistException.UploadError(f"json读取异常, result: {result}")
         if res_code == 200:
             log.info(f"上传完毕, 文件地址: {dst_path}/{filename}")
+            self.getpath(f'{dst_path}/{filename}')  # 刷新一次
             return
         else:
             # 天翼云盘判定，改非秒传上传
@@ -845,7 +846,7 @@ class AlistV3:
         for c, file in enumerate(union_sync, start=1):
             t = myThread(sync_func, file, union_sync, semaphore, c)
             t.start()
-            if c > 200:     # 每同步超过200个文件，则休息半小时
+            if c % 200 == 0:     # 每同步超过200个文件，则休息半小时
                 t.join()        # 阻塞
                 log.info("已经同步了200个文件了，休息半小时！")
                 time.sleep(1800)    # 等待
