@@ -264,6 +264,9 @@ class AlistV3:
         :param newname: 新名字
         :return:
         """
+        file_dir = os.path.dirname(file_p)
+        self.getpath(file_dir)  # 刷新需要重命名的目录
+        time.sleep(0.5)     # 等待
         json_data = {
             'name': newname,
             'path': file_p,
@@ -271,6 +274,8 @@ class AlistV3:
         res = self.s.post(self._RENAME_URL, json=json_data).text
         if json.loads(res)['code'] == 200:
             log.info(f"{file_p} --已重命名--> {newname}")
+            self.getpath(file_dir)  # 刷新需要重命名的目录
+            time.sleep(0.5)  # 等待
             return
         else:
             raise AlistException.RenameError(f"重命名失败, 响应结果: {res}")
@@ -291,9 +296,9 @@ class AlistV3:
             'per_page': 0,
             'refresh': True,
         }
-        res = self.s.post(self._LIST_URL, json=json_data).text
-        res = json.loads(res)
-        if res.get('code') != 200:  # 上级目录刷新失败，说明不存在上级目录，则刷新再上一级目录
+        res_list = self.s.post(self._LIST_URL, json=json_data).text
+        res_list = json.loads(res_list)
+        if res_list.get('code') != 200:  # 上级目录刷新失败，说明不存在上级目录，则刷新再上一级目录
             time.sleep(1)           # 防止递归嵌套频繁请求
             self.getpath(dst_dir)
         json_data = {
@@ -302,6 +307,17 @@ class AlistV3:
         }
         res = self.s.post(self._GET_URL, json=json_data).text
         res = json.loads(res)
+        if res.get('code') == 200 and res.get('data').get('is_dir') is True:
+            json_data = {
+                'path': dst_path,
+                'password': '',
+                'page': 1,
+                'per_page': 0,
+                'refresh': True,
+            }
+            res_dst_list = self.s.post(self._LIST_URL, json=json_data).text
+            res_dst_list = json.loads(res_dst_list)
+            res['data']['files'] = res_dst_list['data']['content']
         return res
 
     @AlistException(AlistException.MkdirError)
@@ -522,12 +538,13 @@ class AlistV3:
         _download_request(down_url=url, save_p=save_file_p)
 
     @AlistException(AlistException.UploadError)
-    def upload(self, file_path: str, dst_path: str, mkdir_flag: bool = False):
+    def upload(self, file_path: str, dst_path: str, mkdir_flag: bool = False, rename=None):
         """
         上传文件
         :param file_path: 上传的文件路径
         :param dst_path: 目标路径
         :param mkdir_flag: 当目标路径不存在时是否创建路径，如果为True则自动创建路径，默认为False
+        :param rename: 上传文件后重命名
         :return:
         """
 
@@ -540,7 +557,7 @@ class AlistV3:
             allowed_chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890'
             return ''.join(random.choice(allowed_chars) for _ in range(str_size))
 
-        log.info(f"正在上传: {file_path}")
+        log.info(f"正在上传: {file_path} -> {dst_path}")
 
         # 获取文件名称
         filename = os.path.basename(file_path)
@@ -594,12 +611,16 @@ class AlistV3:
             # 天翼云盘判定，改非秒传上传
             if "MissingContentLength" not in result:
                 raise AlistException.UploadError(result)
-            if "Cloud189" not in dst_path:      # 说明是天翼云盘
+            if "Cloud189" not in dst_path:  # 说明是天翼云盘
                 raise AlistException.UploadError(result)
-            if "Cloud189Sub" in dst_path:       # 说明天翼云盘关闭秒传上传也失败了
+            if "Cloud189Sub" in dst_path:  # 说明天翼云盘关闭秒传上传也失败了
                 raise AlistException.UploadError(result)
             new_dst_path = dst_path.replace("Cloud189", "Cloud189Sub")
             self.upload(file_path, new_dst_path, mkdir_flag)
+
+        if rename is not None:  # 需要rename
+            time.sleep(1)   # 等待1秒
+            self.rename(dst_path + '/' + filename, rename)
 
     @AlistException(AlistException.SyncError)
     def sync(self, src_path, dst_path_list, rclone_space="alistv3", filter_file=None, auto=False, thread_max_num=None):
